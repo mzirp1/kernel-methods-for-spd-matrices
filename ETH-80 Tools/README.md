@@ -42,7 +42,7 @@ Loads precomputed covariance matrices from the ETH-80 dataset.
 - `base_dir` (str): Base directory containing the ETH-80 dataset.
 
 **Returns**:
-- `cov_matrices` (numpy array): Array of covariance matrices (\(n $\times$ 5 \times 5\)).
+- `cov_matrices` (numpy array): Array of covariance matrices (\(n $\times$ 5 $\times$ 5\)).
 - `true_labels` (numpy array): Integer labels corresponding to categories.
 
 **Expected Folder Structure**:
