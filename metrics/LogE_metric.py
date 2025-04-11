@@ -77,43 +77,22 @@ def loge_polynomial_kernel(X, Y=None, c=0, d=1):
 
     return (K + c)**d
 
-# Log-Euclidean Gaussian Kernel
-def loge_gaussian_kernel(X, Y=None, sigma=1):
-    """
-    Computes the Gaussian kernel between two sets of matrices using the Log-Euclidean metric.
+# LogE Gaussian kernel
+def loge_gaussian_kernel(matrix_array, sigma=1):
+    n = matrix_array.shape[0]
+    distances = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            distances[i, j] = LogE_dist(matrix_array[i, :, :], matrix_array[j, :, :])
+    kernel_matrix = np.exp(-distances**2 / (2 * sigma**2))
+    return kernel_matrix
 
-    Parameters:
-    X (array): Array of shape (n, p, p).
-    Y (array, optional): Array of shape (m, p, p). If None, Y=X.
-    sigma (float): Scale parameter for the Gaussian kernel.
-
-    Returns:
-    K: A kernel matrix.
-    """
-    if Y is None:
-        Y = X  # If no Y is provided, compute the kernel between matrices in X
-      
-    distances = LogE_dist_matrix(X, Y)
-    K = np.exp(-distances**2 / (2 * sigma**2))
-    return K
-
-# Log-Euclidean Generalized Gaussian Kernel
-def loge_gen_gaussian_kernel(X, Y=None, sigma=1, q=2):
-    """
-    Computes the generalized Gaussian kernel between two sets of matrices using the Log-Euclidean metric.
-
-    Parameters:
-    X (array): Array of shape (n, p, p).
-    Y (ndarray, optional): Array of shape (m, p, p). If None, Y=X.
-    sigma (float): Scale parameter for the Gaussian kernel.
-    q (float): Exponent parameter for the generalized Gaussian kernel, 0<q<2.
-
-    Returns:
-    K: A kernel matrix.
-    """
-    if Y is None:
-        Y = X  # If no Y is provided, compute the kernel between matrices in X
-      
-    distances = LogE_dist_matrix(X, Y)
-    K = np.exp(-distances**q / (2 * sigma**2))
-    return K
+# LogE Gaussian kernel (generalized)
+def loge_gen_gaussian_kernel(matrix_array, sigma=1, q=2):
+    n = matrix_array.shape[0]
+    distances = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            distances[i, j] = LogE_dist(matrix_array[i, :, :], matrix_array[j, :, :])
+    kernel_matrix = np.exp(-distances**q / (2 * sigma**2))
+    return kernel_matrix
