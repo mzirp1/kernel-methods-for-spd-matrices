@@ -150,10 +150,10 @@ def ai_gaussian_kernel(X, Y=None, sigma=1):
     for i in range(n_samples_X):
         for j in range(n_samples_Y):
             # Compute the AI distance between matrices
-            distances[i, j] = AI_dist(X[i, :, :], Y[j, :, :])
+            K[i, j] = AI_dist(X[i, :, :], Y[j, :, :])
     
     # Apply the Gaussian kernel formula
-    K = np.exp(-distances**2 / (2 * sigma**2))
+    K = np.exp(-K**2 / (2 * sigma**2))
     
     return K
 

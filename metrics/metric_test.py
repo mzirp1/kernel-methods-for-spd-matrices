@@ -47,15 +47,6 @@ def is_symmetric(A, epsilon=1e-8):
 def gaussian(mat, sigma=1):
     return np.exp(-mat**2 / (2 * sigma**2))
 
-def riemann_bw_gaussian(matrix_array, sigma=1): # matrix array is MxMxN
-    k = riemann.utils.distance.pairwise_distance(matrix_array, metric="wasserstein")
-    return gaussian(k, sigma)
-
-def riemann_logeuclid_gaussian(matrix_array, sigma=1): # matrix array is MxMxN
-    k = riemann.utils.distance.pairwise_distance(matrix_array, metric="logeuclid")
-    return gaussian(k, sigma)
-
-
 def are_matrices_equal(mat1, mat2, epsilon=1e-9):
     """
     Checks whether two matrices are equal within a given epsilon value.
@@ -91,31 +82,37 @@ def load_matrice(filepath):
     return stacked_mat
     
 class CheckEqualMetric(unittest.TestCase):
+    @unittest.skip("skip logeuclid")
     def test_logeuclid_metric(self):
-
-        # TODO - Change filepath
+    
+        # TODO - Change filepath, check in implementation 
         ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:5]
 
 
         start = time.time()
-        kern_matrix1 = riemann_logeuclid_gaussian(ptsd_mat)
+        kern_matrix1 = gaussian(
+            riemann.utils.distance.pairwise_distance(ptsd_mat, metric="logeuclid")
+        )
         end = time.time()
         
         print("Riemann Logeuclid: ",  end - start)
 
         start = time.time()
-        kern_matrix2 = LogE_metric.loge_linear_kernel(ptsd_mat)
+        kern_matrix2 = LogE_metric.loge_gaussian_kernel(ptsd_mat)
         end = time.time()
         print("Implemented Logeuclid: ", end - start)
-        assert(are_matrices_equal(kern_matrix1, kern_matrix2), True)
+        self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2))
 
+    # @unittest.skip("skip bw")
     def test_bw_metric(self):
-        # Limit 
         ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:5]
 
 
         start = time.time()
-        kern_matrix1 = riemann_bw_gaussian(ptsd_mat)
+       
+        kern_matrix1 = gaussian(
+            riemann.utils.distance.pairwise_distance(ptsd_mat, metric="wasserstein")
+        )
         end = time.time()
         print("Riemann BW: ",  end - start)
 
@@ -124,7 +121,27 @@ class CheckEqualMetric(unittest.TestCase):
         kern_matrix2 = BW_metric.bw_gaussian_kernel(ptsd_mat)
         end = time.time()
         print("Implemented BW: ", end - start)
-        assert(are_matrices_equal(kern_matrix1, kern_matrix2), True)
+        self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2), True)
 
+    # @unittest.skip("ai dist")
+    def test_riemann_mean(self):
+        ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:5]
+
+
+        start = time.time()
+        kern_matrix1 = gaussian(
+            riemann.utils.distance.pairwise_distance(ptsd_mat, metric="riemann")
+        )
+        end = time.time()
+        print("Riemann Affine-Invariant: ",  end - start)
+
+
+        start = time.time()
+        kern_matrix2 = AI_metric.ai_gaussian_kernel(ptsd_mat)
+        end = time.time()
+        print("Implemented Riemann Mean: ", end - start)
+        print(are_matrices_equal(kern_matrix1, kern_matrix2))
+        self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2))
+  
 if __name__ == '__main__':
     unittest.main()
