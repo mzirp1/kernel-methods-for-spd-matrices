@@ -2,150 +2,180 @@ import numpy as np
 import time
 import pyriemann as riemann
 import scipy
+from sklearn.metrics import accuracy_score, cohen_kappa_score
 
 import csv
-from sklearn.model_selection import ParameterGrid
-
-
-RIEMANN = "riemann"
-LOGEUCLID = "logeuclid"
-WASSERSTEIN = "wasserstein"
-
-PTSD = "PTSD"
-ALZHEIMERS = "Alzheimers"
-ADHD = "ADHD"
-ABIDE = "Autism"
-
-MULTI = "Multi"
-BINARY = "Binary"
+from utils import *
+from sklearn.model_selection import ParameterGrid, RepeatedKFold
+from sklearn.decomposition import KernelPCA
+from sklearn.svm import SVC
 
 
 
+def evaluate_kernel(kernel_mat, y, gamma, n_splits=5, n_repeats=3):
+    rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats)
+    accuracies = []
+    kappas = []
+    times = []
 
-# NOTE: This should probably be rewritten everything is a bit hacky...
+    # Iterate over each fold and repetition
+    for train_index, test_index in rkf.split(kernel_mat):
+        y_train, y_test = y[train_index], y[test_index]
+        trainK = kernel_mat[train_index, :]
+        
 
-class ClassIndex:
-
-    """
-    Given a class inside a dataset, the class index represents the starting and ending index in the array
-    Parameters: 
-    dc_path: 
-    dc_name: The name of the database of the .mat file
-    """
-    def __init__(self, start: int, end: int, class_name: str) -> None:
-        self.start = start
-        self.end = end
-        self.class_name = class_name
+        # Fit SVM classifier
+        clf = SVC(kernel='rbf', C=1, gamma=gamma)
     
-    def __str__(self) -> str:
-        return f'{self.class_name}: ({self.start}, {self.end})'
+        start = time.time()
+        model = clf.fit(trainK, y_train)
+        
+        # Predict on the test kernel
+        y_pred = model.predict(kernel_mat[test_index, :])
+        end = time.time()
+        t = end - start
+        
+        # Calculate accuracy
+        accuracy = accuracy_score(y_test, y_pred)
+        kappa = cohen_kappa_score(y_test, y_pred)
+
+        # Append metrics to lists
+        accuracies.append(accuracy)
+        kappas.append(kappa)
+        times.append(t)
 
 
-class Dataset:
+    # Calculate average accuracy
+    avg_accuracy = np.mean(accuracies)
+    avg_kappa = np.mean(kappas)
+    avg_time = np.mean(times)
+
+
+
+    return avg_accuracy, avg_kappa, avg_time
+
+
+def create_fmri_results(datasets: list[Dataset], pairwise_dist_path, distance_choices, classification_choices, sigma_choices, gamma_choices, ncomponent_choices):
     """
-    Parameters: 
-    dc_path: The relative path to the .mat file
-    dc_name: The name of the database of the .mat file
+    Perform Kernel Support Vector Machine (SVM) classification using a precomputed 
+    kernel matrix with repeated k-fold cross-validation on the fMRI dataset.
+    The function tunes the  regularization parameter C and evaluates model performance based on accuracy 
+    and Cohen's kappa metric.
+
+    Parameters:
+    ----------
+    datasets : list[Dataset]
+        An array of fMRI of datasets to evaluate
+
+    kernel_path : string
+        Path to where the the pairwise distance matrix for the dataset 
+
+    distances_choices : array
+        An array of distance choices to evaluate the fMRI dataset on (logeuclid, riemann, wasserstein)
+
+    classification_choices : array
+        An array of classifcations options for SVM (Binary or Multi)
     """
-    def __init__(self, dc_path, dc_name):
 
-        # List of the ClassIndexes for all the classes given an fMRI dataset  
-        self.indexes = []
-        self.name = dc_name
+    with open('kernel_result.csv', 'w', newline='') as csvfile:
 
-        dataset = scipy.io.loadmat(dc_path)
+        # TODO: Include the parameters for each kernel, and get their SVM result, PCA results
+        # Add results for SVM Results (Accuracy) for fMRI Dataset, PCA + SVM Results Accuracy, time on SVM?,  FDA (Fischer Discriminant Analysis)?, Time spent on PCA?, BOTH MULTI AND BINARY CLASSICATION, sigma numbers
+        fieldnames = ['Dataset', 'Classification Type', 'Metric', 'Kernel Type', 'SVM Time', 'PCA + SVM Results Accuracy', 'PCA + SVM Kappa', 'KPCA-Time', 'Sigma', 'Gamma', 'Total PCA Components']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for params in ParameterGrid({'dataset': datasets, 'distance': distance_choices, 'classification': classification_choices, 'sigma': sigma_choices, 'gamma': gamma_choices, 'n_components': ncomponent_choices}):
+            gamma = params['gamma']
+            sigma = params['sigma']
+            classification = params['classification']
+            distance = params['distance']
+            dataset = params['dataset']
+            ncomponents = params['n_components']
+
+            precomputed_pairwise_dist = os.path.join(pairwise_dist_path, dataset.name, distance + ".npy")
+            kernel_mat = load_matrix_from_file(precomputed_pairwise_dist)
+            kernel_mat = gaussian(kernel_mat, sigma)
+            I = np.eye(kernel_mat.shape[0])
+
+            # Skip over if our kernel matrix is the identity matrix
+            if np.all(np.equal(kernel_mat, I)):
+                continue
 
 
-        # Get the keys (note that all the class keys are after index 3) and reorder so that the control is first
-        # NOTE: This is hardcoded...
-        keys = list(dataset.keys())[3:]
-        keys = self.reorder_control(keys)
 
-        dim = dataset[keys[0]].shape[0]
+            y = dataset.ys if classification == MULTI else dataset.binary_ys
 
-        self.stacked_mat = np.empty(shape=(dim, dim, 0))
-        self.ys = np.empty(shape=(0), dtype=int)
+            # pca = KernelPCA(
+            #     kernel="rbf", fit_inverse_transform=False, gamma=gamma
+            # )
 
-        
-        self.binary_ys = np.empty(shape=(0), dtype=int)
-        
-        cummulative = 0
-        
-        for i, k in enumerate(keys):
-            keywords = k.split("_")
-            
-            mat = dataset[k]
-            mat_n_elements = mat.shape[2]
-            
-            self.ys = np.concatenate((self.ys, [i] * mat_n_elements))
-            
-            self.binary_ys = np.concatenate((self.binary_ys, [min(i, 1)] * mat_n_elements))
-            
-            # The last word in the key in the class name
-            class_name = keywords[-1]
-            
-            self.stacked_mat = np.concatenate((self.stacked_mat, mat), axis=2)
-            
-            class_index = ClassIndex(cummulative, cummulative + mat_n_elements, class_name)
-            cummulative += mat_n_elements
-            self.indexes.append(class_index)
-        self.stacked_mat = self.stacked_mat.transpose((2, 1 ,0))
+            kernel_pca = KernelPCA(
+                n_components=ncomponents, kernel="precomputed", fit_inverse_transform=False, coef0=0.0001,
+            )
 
-    # Function that ensures that the control is the first element in the list
-    def reorder_control(self, keys):
-        key_index = -1
-        for i, k in enumerate(keys):
-            if "control" in k:
-                key_index = i
-                break
-        if key_index > 0:
-            keys[0], keys[key_index] = keys[key_index], keys[0]
-        return keys
+            pca_start = time.time()
+            reduced_kernel_mat = kernel_pca.fit_transform(kernel_mat)
+            pca_end = time.time()
+            pca_time = np.round(pca_end - pca_start, 2)
+
+            avg_accuracy, avg_kappa, avg_time = evaluate_kernel(reduced_kernel_mat, y, gamma)
+
+            writer.writerow({
+                'Dataset': dataset.name,
+                'Classification Type': classification,
+                'Metric': distance,
+                'Kernel Type': 'Gaussian',
+                'SVM Time': avg_time,
+                'PCA + SVM Results Accuracy': avg_accuracy,
+                'PCA + SVM Kappa': avg_kappa,
+                'KPCA-Time': pca_time,
+                'Sigma': sigma,
+                'Gamma': gamma,
+                'Total PCA Components': ncomponents,
+            })
+
+
+
     
-    def print_indexes(self):
-        for i in self.indexes:
-            print(i)
-        
 
 
-if __name__ == '__main__':
-    PTSD_DATASET = Dataset("../fMRI/sfc_ptsd_dc_filt.mat", PTSD)
 
-    ALZHEIMERS_DATASET = Dataset("../fMRI/sfc_adni_dc.mat", ALZHEIMERS)
-    ADHD_DATASET = Dataset("../fMRI/sfc_adhd_dc.mat", ADHD)
+def main():
+    PTSD_DATASET = Dataset("../fMRI/sfc_ptsd_dc_filt.mat", PTSD, True)
+    ALZHEIMERS_DATASET = Dataset("../fMRI/sfc_adni_dc.mat", ALZHEIMERS, False)
+    ADHD_DATASET = Dataset("../fMRI/sfc_adhd_dc.mat", ADHD, False)
+    ABIDE_DATASET = Dataset("../fMRI/sfc_abide_dc.mat", ABIDE, False)
 
-    ABIDE_DATASET = Dataset("../fMRI/sfc_abide_dc.mat", ABIDE)
-
-    datasets = [PTSD_DATASET]
+    datasets = [
+        PTSD_DATASET, 
+        # ALZHEIMERS_DATASET,
+        # ADHD_DATASET, 
+        # ABIDE_DATASET
+    ]
 
     for data in datasets:
         print(f"{data.name} Matrix Shape: {data.stacked_mat.shape}")
         data.print_indexes()
         print()
+        # print(data.ys)
 
-    distance_choices = [LOGEUCLID]
-    classification_choices = [MULTI]
+    distance_choices = [LOGEUCLID, WASSERSTEIN, RIEMANN_AI]
+    classification_choices = [MULTI, BINARY]
 
-    # gamma_choices = [0.003]
-    # sigma_choices = [0.03]
+    # Utilized for the gaussian kernel
+    sigmas_choices = [0.005, 0.5, 1, 2, 4, 8, 10]
+
+    # Utilized for gamma parameter in SVM
+    gamma_choices = [0.005, 0.5, 1, 2, 4, 8, 10]
+    ncomponent_choices = np.arange(15, 120, 5)
+    pairwise_dist_path = "../fMRI/kernels"
+
+    create_fmri_results(datasets, pairwise_dist_path, distance_choices, classification_choices, sigmas_choices, gamma_choices, ncomponent_choices)
 
 
-
-    with open('kernel_result.csv', 'w', newline='') as csvfile:
-        fieldnames = ['Dataset', 'Kernel Type', 'Comp Time']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        writer.writeheader()
-
-
-        for dataset in datasets:
-            mat = dataset.stacked_mat
-            start = time.time()
-            # TODO: Take the gaussian
-            kern_matrix = riemann.utils.distance.pairwise_distance(mat, mat, metric="wasserstein")
-            end = time.time()
-            print(end-start)
-            writer.writerow({'Dataset': dataset.name, 'Kernel Type': 'BW', 'Comp Time': np.round(end-start, 2)})
+if __name__ == '__main__':
+    main()
 
 
 
