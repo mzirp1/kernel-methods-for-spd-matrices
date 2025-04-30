@@ -55,7 +55,7 @@ def evaluate_kernel(kernel_mat, y, gamma, n_splits=5, n_repeats=3):
     return avg_accuracy, avg_kappa, avg_time
 
 
-def create_fmri_results(datasets: list[Dataset], pairwise_dist_path, distance_choices, classification_choices, sigma_choices, gamma_choices, ncomponent_choices):
+def create_fmri_results(pairwise_dist_path, parameters):
     """
     Perform Kernel Support Vector Machine (SVM) classification using a precomputed 
     kernel matrix with repeated k-fold cross-validation on the fMRI dataset.
@@ -64,54 +64,82 @@ def create_fmri_results(datasets: list[Dataset], pairwise_dist_path, distance_ch
 
     Parameters:
     ----------
-    datasets : list[Dataset]
-        An array of fMRI of datasets to evaluate
-
     kernel_path : string
         Path to where the the pairwise distance matrix for the dataset 
+    parameters : list[dict]
+        Parameter grid for kernels
 
-    distances_choices : array
-        An array of distance choices to evaluate the fMRI dataset on (logeuclid, riemann, wasserstein)
-
-    classification_choices : array
-        An array of classifcations options for SVM (Binary or Multi)
     """
 
     with open('kernel_result.csv', 'w', newline='') as csvfile:
-
-        # TODO: Include the parameters for each kernel, and get their SVM result, PCA results
-        # Add results for SVM Results (Accuracy) for fMRI Dataset, PCA + SVM Results Accuracy, time on SVM?,  FDA (Fischer Discriminant Analysis)?, Time spent on PCA?, BOTH MULTI AND BINARY CLASSICATION, sigma numbers
-        fieldnames = ['Dataset', 'Classification Type', 'Metric', 'Kernel Type', 'SVM Time', 'PCA + SVM Results Accuracy', 'PCA + SVM Kappa', 'KPCA-Time', 'Sigma', 'Gamma', 'Total PCA Components']
+        fieldnames = [
+            'Dataset', 
+            'Classification Type', 
+            'Metric', 
+            'Kernel Type', 
+            'Q',
+            'Sigma', 
+            'C',
+            'D',
+            'SVM Time', 
+            'PCA + SVM Results Accuracy', 
+            'PCA + SVM Kappa',
+            'KPCA-Time', 
+            'Gamma', 
+            'Total PCA Components'
+        ]
+        
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
-        for params in ParameterGrid({'dataset': datasets, 'distance': distance_choices, 'classification': classification_choices, 'sigma': sigma_choices, 'gamma': gamma_choices, 'n_components': ncomponent_choices}):
+        for params in parameters:
             gamma = params['gamma']
-            sigma = params['sigma']
             classification = params['classification']
             distance = params['distance']
             dataset = params['dataset']
             ncomponents = params['n_components']
+            kernel = params['kernel']
+                            
+            precomputed_pairwise_dist_file = os.path.join(pairwise_dist_path, dataset.name, distance + ".npy")
 
-            precomputed_pairwise_dist = os.path.join(pairwise_dist_path, dataset.name, distance + ".npy")
-            kernel_mat = load_matrix_from_file(precomputed_pairwise_dist)
-            kernel_mat = gaussian(kernel_mat, sigma)
-            I = np.eye(kernel_mat.shape[0])
+            # Skip over if the kernel has not been precomputed 
+            if not os.path.exists(precomputed_pairwise_dist_file):
+                continue
+
+            y = dataset.ys if classification == MULTI else dataset.binary_ys
+            kernel_mat = load_matrix_from_file(precomputed_pairwise_dist_file)
+
+            c = None
+            d = None
+            q = None
+            sigma = None
+            if kernel == LINEAR:
+                c = params['c']
+                d = params['d']
+                if c != 0 or d != 1:
+                    kernel = POLYNOMIAL
+
+                kernel_mat = (kernel_mat + c) ** d
+
+            elif kernel == GAUSSIAN:
+                sigma = params['sigma']
+                q = params['q']
+                if q != 2:
+                    kernel = GAUSSIAN_GENERAL
+
+                kernel_mat = gen_gaussian(kernel_mat, sigma, q)
 
             # Skip over if our kernel matrix is the identity matrix
+            I = np.eye(kernel_mat.shape[0])
             if np.all(np.equal(kernel_mat, I)):
                 continue
 
-
-
-            y = dataset.ys if classification == MULTI else dataset.binary_ys
-
-            # pca = KernelPCA(
-            #     kernel="rbf", fit_inverse_transform=False, gamma=gamma
-            # )
+            # Skip over if our kernel matrix is not positive definite
+            if not is_positive_definite(kernel_mat):
+                continue
 
             kernel_pca = KernelPCA(
-                n_components=ncomponents, kernel="precomputed", fit_inverse_transform=False, coef0=0.0001,
+                n_components=ncomponents, kernel="precomputed",
             )
 
             pca_start = time.time()
@@ -125,12 +153,15 @@ def create_fmri_results(datasets: list[Dataset], pairwise_dist_path, distance_ch
                 'Dataset': dataset.name,
                 'Classification Type': classification,
                 'Metric': distance,
-                'Kernel Type': 'Gaussian',
+                'Kernel Type': kernel,
                 'SVM Time': avg_time,
                 'PCA + SVM Results Accuracy': avg_accuracy,
                 'PCA + SVM Kappa': avg_kappa,
                 'KPCA-Time': pca_time,
                 'Sigma': sigma,
+                'Q': q,
+                'C': c,
+                'D': d,
                 'Gamma': gamma,
                 'Total PCA Components': ncomponents,
             })
@@ -147,6 +178,8 @@ def main():
     ADHD_DATASET = Dataset("../fMRI/sfc_adhd_dc.mat", ADHD, False)
     ABIDE_DATASET = Dataset("../fMRI/sfc_abide_dc.mat", ABIDE, False)
 
+
+    # TODO: Figure out what to do for commented out datasets which are non-spd!
     datasets = [
         PTSD_DATASET, 
         # ALZHEIMERS_DATASET,
@@ -163,15 +196,32 @@ def main():
     distance_choices = [LOGEUCLID, WASSERSTEIN, RIEMANN_AI]
     classification_choices = [MULTI, BINARY]
 
-    # Utilized for the gaussian kernel
-    sigmas_choices = [0.005, 0.5, 1, 2, 4, 8, 10]
-
     # Utilized for gamma parameter in SVM
     gamma_choices = [0.005, 0.5, 1, 2, 4, 8, 10]
+
+    # Utilized for the gaussian + generalized gaussian kernel
+    # Gaussian of q = 2
+    sigma_choices = [0.005, 0.5, 1, 2, 4, 8, 10]
+    q_choices = [0.5, 2, 3]
+
+    # Utilized for the polynomial and linear kernel
+    # Linear kernel if c = 0, d = 1
+    c_choices = [0.1, 0, 1, 5]
+    d_choices = [0.5, 1, 2, 5]
+
     ncomponent_choices = np.arange(15, 120, 5)
     pairwise_dist_path = "../fMRI/kernels"
 
-    create_fmri_results(datasets, pairwise_dist_path, distance_choices, classification_choices, sigmas_choices, gamma_choices, ncomponent_choices)
+
+    grid = [
+        {'kernel': [LINEAR], 'dataset': datasets, 'distance': distance_choices, 'classification': classification_choices, 'c': c_choices, 'd': d_choices, 'gamma': gamma_choices, 'n_components': ncomponent_choices}, 
+        # {'kernel': [GAUSSIAN], 'dataset': datasets, 'distance': distance_choices, 'classification': classification_choices, 'sigma': sigma_choices, 'q': q_choices, 'gamma': gamma_choices, 'n_components': ncomponent_choices}
+    ]
+    
+    parameters = ParameterGrid(grid)
+    
+    create_fmri_results(pairwise_dist_path, parameters)
+
 
 
 if __name__ == '__main__':

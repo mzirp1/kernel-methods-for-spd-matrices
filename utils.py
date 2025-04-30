@@ -14,6 +14,10 @@ ABIDE = "Autism"
 MULTI = "Multi"
 BINARY = "Binary"
 
+GAUSSIAN = "Gaussian"
+GAUSSIAN_GENERAL = "GaussianGeneral"
+LINEAR = "Linear"
+POLYNOMIAL= "Polynomial"
 
 # NOTE: This should probably be rewritten everything is a bit hacky...
 class ClassIndex:
@@ -239,6 +243,9 @@ def nearest_pd(A):
 
 def gaussian(mat, sigma=1):
     return np.exp(-mat**2 / (2 * sigma**2))
+
+def gen_gaussian(mat, sigma=1, q=2):
+    return np.exp(-mat**q / (2 * sigma**2))
 
 def try_make_dir(path):
     if not os.path.exists(path):

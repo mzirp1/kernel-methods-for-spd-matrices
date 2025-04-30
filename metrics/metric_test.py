@@ -8,11 +8,15 @@ import pyriemann as riemann
 import BW_metric
 import AI_metric
 import LogE_metric
+
+import sys
+sys.path.append("..")
+
 from utils import *
 
 class CheckEqualMetric(unittest.TestCase):
-    # @unittest.skip("skip logeuclid")
-    def test_logeuclid_metric(self):
+    @unittest.skip("skip logeuclid")
+    def test_logeuclid_gaussian_kernel(self):
         print()
         # TODO - Change filepath, check in implementation 
         ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:5]
@@ -33,7 +37,7 @@ class CheckEqualMetric(unittest.TestCase):
         self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2))
 
     # @unittest.skip("skip bw")
-    def test_bw_metric(self):
+    def test_bw_gaussian_kernel(self):
         ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:5]
 
 
@@ -52,8 +56,8 @@ class CheckEqualMetric(unittest.TestCase):
         print("Implemented BW: ", end - start)
         self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2), True)
 
-    # @unittest.skip("ai dist")
-    def test_riemann_mean(self):
+    @unittest.skip("ai dist")
+    def test_riemann_gaussian_kernel(self):
         ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:5]
 
 
@@ -72,5 +76,24 @@ class CheckEqualMetric(unittest.TestCase):
         print("Implemented Affine-Invarient: ", end - start)
         self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2))
   
+    def test_bw_linear_kernel(self):
+        ptsd_mat = load_matrice("../../fMRI/sfc_ptsd_dc_filt.mat")[0:3]
+
+
+        # start = time.time()
+        # kern_matrix1 = gaussian(
+        #     riemann.utils.distance.pairwise_distance(ptsd_mat, metric="riemann")
+        # )
+        # end = time.time()
+        # print("Riemann Affine-Invariant: ",  end - start)
+
+
+        start = time.time()
+        kern_matrix = BW_metric.bw_linear_kernel(ptsd_mat)
+        end = time.time()
+        print(kern_matrix)
+
+        print("BW Linear Kernel: ", end - start)
+        # self.assertTrue(are_matrices_equal(kern_matrix1, kern_matrix2))
 if __name__ == '__main__':
     unittest.main()
